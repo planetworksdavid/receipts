@@ -31,37 +31,41 @@ class TestPredictPipeline(unittest.TestCase):
         self.mock_model = MagicMock(spec=Prophet) # Use Prophet for spec
 
         # Configure mock model's methods that are called by the functions under test
+        # Using recent/future dates and larger yhat values
         self.future_df_output = pd.DataFrame({
-            'ds': pd.to_datetime(['2023-01-01', '2023-01-02', '2023-01-03'])
+            'ds': pd.to_datetime(['2025-06-01', '2025-06-02', '2025-06-03'])
         })
-        self.mock_model.make_future_dataframe.return_value = self.future_df_output
+        # self.mock_model.make_future_dataframe.return_value = self.future_df_output # This will be set per test or as needed
 
         self.predict_output = pd.DataFrame({
-            'ds': pd.to_datetime(['2023-01-01', '2023-01-02', '2023-01-03']),
-            'yhat': [100, 110, 120],
-            'yhat_lower': [90, 100, 110],
-            'yhat_upper': [110, 120, 130]
+            'ds': pd.to_datetime(['2025-06-01', '2025-06-02', '2025-06-03']),
+            'yhat': [12000, 12500, 11800], # Larger yhat values
+            'yhat_lower': [11000, 11500, 10800],
+            'yhat_upper': [13000, 13500, 12800]
         })
-        self.mock_model.predict.return_value = self.predict_output
+        # self.mock_model.predict.return_value = self.predict_output # This will be set per test or as needed
 
-        self.sample_actuals_data = {
-            'ds': pd.to_datetime(['2023-01-01', '2023-01-02']),
-            'y': [105, 108]
+        self.sample_actuals_data = { # For test_evaluate_model
+            'ds': pd.to_datetime(['2025-05-01', '2025-05-02']), # Recent dates
+            'y': [10500, 10800] # Larger y values
         }
         self.sample_actuals_df = pd.DataFrame(self.sample_actuals_data)
 
         # Sample processed data for testing load_and_prepare_actuals_for_evaluation
-        self.sample_processed_for_actuals = {
-            'transaction_date': pd.to_datetime(['2023-01-01', '2023-01-01', '2023-01-02', '2023-01-03']),
-            'total': [100.0, 5.0, 108.0, 200.0],
+        # Using recent/future dates and larger totals, M/D/YYYY for transaction_date if it were string
+        self.sample_processed_for_actuals_data = {
+            'transaction_date': pd.to_datetime([
+                "05/30/2025", "05/30/2025", # Duplicate date
+                "05/31/2025",               # Single transaction
+                "06/01/2025"                # Voided transaction
+            ], format="%m/%d/%Y"),
+            'total': [15000.0, 8000.0, 7500.0, 5000.0], # Larger totals
             'is_voided': [False, False, False, True], # Last one is voided
-             # Other columns that might be present
             'payment_type': ['Card', 'Cash', 'Card', 'Cash'],
-            'transaction_day_of_week': [6,6,0,1],
-            'transaction_month': [1,1,1,1]
+            'transaction_day_of_week': pd.to_datetime(["05/30/2025", "05/30/2025", "05/31/2025", "06/01/2025"], format="%m/%d/%Y").dayofweek,
+            'transaction_month': pd.to_datetime(["05/30/2025", "05/30/2025", "05/31/2025", "06/01/2025"], format="%m/%d/%Y").month
         }
-        self.sample_processed_df_for_actuals = pd.DataFrame(self.sample_processed_for_actuals)
-
+        self.sample_processed_df_for_actuals = pd.DataFrame(self.sample_processed_for_actuals_data)
 
     def tearDown(self):
         self.test_dir_tempfile.cleanup()
@@ -84,39 +88,35 @@ class TestPredictPipeline(unittest.TestCase):
     def test_make_future_dataframe(self):
         periods_to_forecast = 3
         freq_str = 'D'
-        # Use a fresh MagicMock for this specific test if needed, or rely on self.mock_model
-        test_model_mock = MagicMock()
-        test_model_mock.make_future_dataframe.return_value = self.future_df_output # Predefined output
+        # Use self.mock_model from setUp, which has future_df_output as its make_future_dataframe return_value
+        self.mock_model.make_future_dataframe.return_value = self.future_df_output # Ensure it's set for this test
 
-        future_df = make_future_dataframe(test_model_mock, periods=periods_to_forecast, freq=freq_str)
+        future_df = make_future_dataframe(self.mock_model, periods=periods_to_forecast, freq=freq_str)
 
-        test_model_mock.make_future_dataframe.assert_called_once_with(periods=periods_to_forecast, freq=freq_str)
+        self.mock_model.make_future_dataframe.assert_called_once_with(periods=periods_to_forecast, freq=freq_str)
         pd.testing.assert_frame_equal(future_df, self.future_df_output)
 
 
     def test_predict_forecast(self):
-        # Use a fresh MagicMock for this specific test
-        test_model_mock = MagicMock()
-        test_model_mock.predict.return_value = self.predict_output # Predefined output
+        # Use self.mock_model from setUp
+        self.mock_model.predict.return_value = self.predict_output # Ensure it's set
 
-        input_future_df = pd.DataFrame({'ds': pd.to_datetime(['2023-01-01', '2023-01-02'])})
-        forecast = predict_forecast(test_model_mock, input_future_df)
+        input_future_df = pd.DataFrame({'ds': pd.to_datetime(['2025-06-01', '2025-06-02', '2025-06-03'])}) # Use recent dates
+        forecast = predict_forecast(self.mock_model, input_future_df)
 
-        test_model_mock.predict.assert_called_once()
-        # pd.testing.assert_frame_equal(test_model_mock.predict.call_args[0][0], input_future_df) # Check input to predict
-        # Check the DataFrame passed to predict call
-        call_args, _ = test_model_mock.predict.call_args
+        self.mock_model.predict.assert_called_once()
+        call_args, _ = self.mock_model.predict.call_args
         pd.testing.assert_frame_equal(call_args[0], input_future_df)
 
-        pd.testing.assert_frame_equal(forecast, self.predict_output)
+        pd.testing.assert_frame_equal(forecast, self.predict_output) # predict_output uses recent dates
 
 
     def test_evaluate_model(self):
-        y_true = pd.Series([10.0, 20.0, 30.0])
-        y_pred = pd.Series([12.0, 18.0, 33.0])
+        y_true = pd.Series([10000.0, 20000.0, 30000.0]) # Larger values
+        y_pred = pd.Series([12000.0, 18000.0, 33000.0])
 
-        expected_mae = np.mean([2.0, 2.0, 3.0]) # |10-12|, |20-18|, |30-33|
-        expected_rmse = np.sqrt(np.mean([4.0, 4.0, 9.0])) # (2^2, 2^2, 3^2)
+        expected_mae = np.mean([2000.0, 2000.0, 3000.0])
+        expected_rmse = np.sqrt(np.mean([2000.0**2, 2000.0**2, 3000.0**2]))
 
         results = evaluate_model(y_true, y_pred)
 
@@ -160,60 +160,44 @@ class TestPredictPipeline(unittest.TestCase):
         self.assertIn('ds', actuals_df.columns)
         self.assertIn('y', actuals_df.columns)
 
-        # Expected:
-        # 2023-01-01: 100 + 5 = 105
-        # 2023-01-02: 108 (2023-01-03 was voided)
-        expected_ds_values = pd.to_datetime(['2023-01-01', '2023-01-02'])
-        expected_y_values = pd.Series([105.0, 108.0], name='y')
+        # Expected based on self.sample_processed_df_for_actuals data:
+        # 05/30/2025: 15000.0 + 8000.0 = 23000.0
+        # 05/31/2025: 7500.0
+        # 06/01/2025: voided, so excluded.
+        expected_ds_values = pd.to_datetime(['05/30/2025', '05/31/2025'], format="%m/%d/%Y")
+        expected_y_values = pd.Series([23000.0, 7500.0], name='y') # Larger totals
 
         pd.testing.assert_series_equal(actuals_df['ds'].reset_index(drop=True), pd.Series(expected_ds_values, name='ds'))
         pd.testing.assert_series_equal(actuals_df['y'].reset_index(drop=True), expected_y_values)
         self.assertEqual(len(actuals_df), 2)
 
     @patch('src.pipelines.predict.load_and_prepare_actuals_for_evaluation')
-    @patch('src.pipelines.predict.load_model') # Mock load_model as it's called in __main__
-    # We use self.mock_model for Prophet's make_future_dataframe and predict, so no need to patch Prophet globally here
+    @patch('src.pipelines.predict.load_model')
     def test_main_block_saves_future_forecast_csv(self, mock_load_model, mock_load_actuals):
         # --- Setup Mocks ---
-        # 1. Configure mock_load_model to return our self.mock_model
-        mock_load_model.return_value = self.mock_model
+        mock_load_model.return_value = self.mock_model # Use the specced mock from setUp
 
-        # 2. Configure mock_load_actuals to return a controlled DataFrame
-        mock_last_actual_date = pd.to_datetime('2023-01-31')
+        mock_last_actual_date = pd.to_datetime('2025-05-31') # Use recent date
         mock_actuals_df = pd.DataFrame({
-            'ds': pd.to_datetime(['2023-01-01', '2023-01-15', mock_last_actual_date.strftime('%Y-%m-%d')]),
-            'y': [10, 20, 30]
+            'ds': pd.to_datetime(['2025-05-01', '2025-05-15', mock_last_actual_date.strftime('%Y-%m-%d')]),
+            'y': [10000, 12000, 13000] # Larger y values
         })
         mock_load_actuals.return_value = mock_actuals_df
 
-        # 3. Configure self.mock_model for make_future_dataframe and predict
-        #    make_future_dataframe should extend from the model's history, which we assume ends at mock_last_actual_date
-        #    Prophet's make_future_dataframe(periods=30) will start from the day after its last known date.
-        #    The mock_model's history isn't explicitly set here, but Prophet()().make_future_dataframe does this.
-        #    So, the 'ds' should start from '2023-02-01' if periods=30 from '2023-01-31'.
-        #    Let's ensure the mocked forecast_df has dates both before and after mock_last_actual_date initially.
-
         num_future_days_to_predict = 30
-        # Simulate a model trained up to mock_last_actual_date
-        # Prophet's make_future_dataframe includes history + future.
-        # Let's define some history dates that would be part of model.history_dates
-        history_dates = pd.to_datetime(['2023-01-30', '2023-01-31']) # Ends at mock_last_actual_date
-
+        # Simulate model's history ending at mock_last_actual_date
+        history_dates = pd.to_datetime(['2025-05-30', '2025-05-31'])
         future_dates_generated = pd.date_range(start=mock_last_actual_date + pd.Timedelta(days=1),
                                                periods=num_future_days_to_predict, freq='D')
-
-        # This is what model.make_future_dataframe would return (history + future)
         all_dates_for_make_df = pd.Index(history_dates).union(pd.Index(future_dates_generated))
         mock_future_df_from_model = pd.DataFrame({'ds': all_dates_for_make_df})
         self.mock_model.make_future_dataframe.return_value = mock_future_df_from_model
 
-        # model.predict will take this combined historical and future df and add yhat, etc.
-        # The output of predict() will have the same 'ds' column as its input.
         mock_predict_output_df = pd.DataFrame({
-            'ds': all_dates_for_make_df, # Should match the ds from make_future_dataframe's output
-            'yhat': np.random.rand(len(all_dates_for_make_df)) * 100,
-            'yhat_lower': np.random.rand(len(all_dates_for_make_df)) * 80,
-            'yhat_upper': np.random.rand(len(all_dates_for_make_df)) * 120
+            'ds': all_dates_for_make_df,
+            'yhat': np.random.rand(len(all_dates_for_make_df)) * 20000, # Larger yhat
+            'yhat_lower': np.random.rand(len(all_dates_for_make_df)) * 18000,
+            'yhat_upper': np.random.rand(len(all_dates_for_make_df)) * 22000
         })
         self.mock_model.predict.return_value = mock_predict_output_df
 

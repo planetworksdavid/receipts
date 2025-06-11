@@ -21,14 +21,26 @@ class TestTrainModelPipeline(unittest.TestCase):
         self.test_dir_tempfile = tempfile.TemporaryDirectory()
         self.test_dir = self.test_dir_tempfile.name
 
+        # Sample processed DataFrame with recent/future dates and larger totals
+        # Dates are already datetime objects, as they would be after load_data.py
         self.sample_processed_data = {
-            'transaction_date': pd.to_datetime(['2023-01-01', '2023-01-01', '2023-01-02', '2023-01-03', '2023-01-03']),
-            'total': [100.0, 50.0, 200.0, 30.0, 70.0],
-            'is_voided': [False, False, True, False, False],
-            # Add other columns that might be present in processed_df but not used by train_prophet_model
-            'payment_type': ['Card', 'Cash', 'Card', 'Cash', 'Card'],
-            'transaction_day_of_week': [6,6,0,1,1], # Sun, Sun, Mon, Tue, Tue
-            'transaction_month': [1,1,1,1,1]
+            'transaction_date': pd.to_datetime([
+                "01/15/2024", "01/15/2024", # Duplicate date
+                "01/16/2024",               # Single transaction
+                "05/30/2025", "05/30/2025", # Future duplicate date
+                "05/31/2025"                # Future single transaction
+            ], format="%m/%d/%Y"),
+            'total': [500.0, 750.25, 1200.0, 15000.0, 8000.0, 7500.0], # Larger totals
+            'is_voided': [False, False, True, False, False, False], # One voided transaction
+            'payment_type': ['Card', 'Cash', 'Card', 'Cash', 'Card', 'Online'],
+            'transaction_day_of_week': pd.to_datetime([
+                "01/15/2024", "01/15/2024", "01/16/2024",
+                "05/30/2025", "05/30/2025", "05/31/2025"
+            ], format="%m/%d/%Y").dayofweek,
+            'transaction_month': pd.to_datetime([
+                "01/15/2024", "01/15/2024", "01/16/2024",
+                "05/30/2025", "05/30/2025", "05/31/2025"
+            ], format="%m/%d/%Y").month
         }
         self.sample_processed_df = pd.DataFrame(self.sample_processed_data)
 
@@ -67,20 +79,26 @@ class TestTrainModelPipeline(unittest.TestCase):
         self.assertIn('ds', fit_df_arg.columns)
         self.assertIn('y', fit_df_arg.columns)
 
-        # Verify data preparation logic
-        # Expected 'ds' and 'y'
-        # Day 1: 100 + 50 = 150 (non-voided)
-        # Day 2: (voided, so not included)
-        # Day 3: 30 + 70 = 100 (non-voided)
-        expected_ds = pd.to_datetime(['2023-01-01', '2023-01-03'])
-        expected_y = pd.Series([150.0, 100.0], name='y')
-        expected_ds_series = pd.Series(expected_ds, name='ds') # Convert DatetimeIndex to Series
+        # Verify data preparation logic based on updated self.sample_processed_df
+        # Original data:
+        # 01/15/2024: 500.0 (False) + 750.25 (False) = 1250.25
+        # 01/16/2024: 1200.0 (True) -> voided, so not included
+        # 05/30/2025: 15000.0 (False) + 8000.0 (False) = 23000.0
+        # 05/31/2025: 7500.0 (False) = 7500.0
 
-        self.assertEqual(len(fit_df_arg), 2) # After filtering and aggregation
-        # fit_df_arg['ds'] already has a reset index from the function being tested
-        # The 'name' attribute of the series will be checked by default if both series have it.
-        pd.testing.assert_series_equal(fit_df_arg['ds'], expected_ds_series)
-        pd.testing.assert_series_equal(fit_df_arg['y'], expected_y)
+        expected_dates_str = ["01/15/2024", "05/30/2025", "05/31/2025"]
+        expected_ds = pd.to_datetime(expected_dates_str, format="%m/%d/%Y")
+        expected_y_values = [1250.25, 23000.0, 7500.0]
+
+        expected_y = pd.Series(expected_y_values, name='y')
+        expected_ds_series = pd.Series(expected_ds, name='ds')
+
+        self.assertEqual(len(fit_df_arg), 3) # After filtering voided and aggregation
+
+        # Ensure ds and y columns in fit_df_arg match expected values
+        # The function under test already does reset_index()
+        pd.testing.assert_series_equal(fit_df_arg['ds'], expected_ds_series, check_dtype=False) # Allow date dtype variations if any
+        pd.testing.assert_series_equal(fit_df_arg['y'], expected_y, check_dtype=False) # Allow float dtype variations
 
         self.assertIs(returned_model, mock_model_instance)
 

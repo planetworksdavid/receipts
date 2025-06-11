@@ -27,26 +27,38 @@ class TestLoadDataPipeline(unittest.TestCase):
 
         # Sample raw DataFrame mimicking expected CSV structure
         self.sample_raw_data = {
-            'transaction_id': [1, 2, 3, 4, 5, 6, 7, 8],
-            'transaction_date': ['2023-01-15', '2023-01-16', None, '2023-01-17', '2023-01-18', '2023-01-19', '2023-01-20', '2023-01-21'],
-            'total': [100, 150.50, 200, 'abc', 300, 50.25, None, 120.0],
-            'balance_remaining': [0, 50.50, 10.0, 20.0, None, 0, 70.0, 20.0],
-            'payment_type': ['Credit Card', 'Cash', 'Debit Card', None, 'Credit Card', 'Online', 'Cash', None],
-            'voided': [0, 'f', True, '1', 'FALSE', None, 't', '0'],
-            'time_created': ['2023-01-15 10:00:00', '2023-01-16 11:00:00', '2023-01-16 12:00:00',
-                             '2023-01-17 13:00:00', '2023-01-18 14:00:00', '2023-01-19 15:00:00',
-                             '2023-01-20 16:00:00', '2023-01-21 17:00:00'],
-            'time_modified': ['2023-01-15 10:00:00', '2023-01-16 11:05:00', '2023-01-16 12:00:00',
-                              '2023-01-17 13:05:00', '2023-01-18 14:00:00', '2023-01-19 15:00:00',
-                              '2023-01-20 16:05:00', '2023-01-21 17:05:00'],
-            'time_voided': [None, None, '2023-01-16 12:30:00', None, None, None, '2023-01-20 16:10:00', None]
+            'transaction_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            'transaction_date': [ # Using M/D/YYYY format for strings
+                "01/15/2024", "01/15/2024", None, "01/17/2024",
+                "05/30/2025", "05/30/2025", "05/31/2025",
+                "bad_date_string", "02/29/2023", # Invalid leap day for non-leap year
+                "03/01/2024"
+            ],
+            'total': [500.00, 750.25, 2000.00, 'invalid_total', 15000.00, 8000.00, 7500.00, 600.00, 900.00, 120.75], # Larger totals, one invalid
+            'balance_remaining': [0.0, 50.50, 100.0, 20.0, 5000.00, 0.0, 750.00, 60.0, 90.0, 0.0],
+            'payment_type': ['Credit Card', 'Cash', 'Debit Card', None, 'Credit Card', 'Online', 'Check', 'Cash', 'Credit Card', 'Debit Card'],
+            'voided': [0, 'f', True, '1', 'FALSE', None, 't', 'F', False, "TRUE"], # Diverse voided values
+            'time_created': ['2024-01-15 10:00:00', '2024-01-15 10:05:00', '2024-01-16 12:00:00',
+                             '2024-01-17 13:00:00', '2025-05-30 14:00:00', '2025-05-30 14:30:00',
+                             '2025-05-31 15:00:00', '2024-01-18 10:00:00', '2023-02-29 11:00:00',
+                             '2024-03-01 12:00:00'],
+            'time_modified': ['2024-01-15 10:00:00', '2024-01-15 11:05:00', '2024-01-16 12:00:00',
+                              '2024-01-17 13:05:00', '2025-05-30 14:05:00', '2025-05-30 14:35:00',
+                              '2025-05-31 15:10:00', '2024-01-18 10:00:00', '2023-02-29 11:00:00',
+                              '2024-03-01 12:05:00'],
+            'time_voided': [None, None, '2024-01-16 12:30:00', None, None, None, '2025-05-31 15:15:00',
+                            None, None, '2024-03-01 12:10:00']
         }
         self.sample_raw_df = pd.DataFrame(self.sample_raw_data)
 
-        # For load_csv_data, ensure date columns are strings before saving to CSV, as they would be in a real CSV
+        # This df is specifically for testing load_csv_data.
+        # It ensures that when saved to CSV, date columns are strings.
         self.csv_ready_df = self.sample_raw_df.copy()
-        for col in ['transaction_date', 'time_created', 'time_modified', 'time_voided']:
-            self.csv_ready_df[col] = self.csv_ready_df[col].astype(str).replace('NaT', '') # Replace NaT with empty string for CSV
+        # For 'transaction_date', it's already strings in M/D/YYYY.
+        # For other datetime columns, convert to string and replace NaT if any were pd.NaT initially (though not in this sample).
+        for col in ['time_created', 'time_modified', 'time_voided']:
+            if col in self.csv_ready_df.columns: # Should always be true here
+                 self.csv_ready_df[col] = self.csv_ready_df[col].astype(str).replace('NaT', '')
 
     def tearDown(self):
         """Tear down test fixtures, if any."""
@@ -58,15 +70,23 @@ class TestLoadDataPipeline(unittest.TestCase):
 
         loaded_df = load_csv_data(dummy_csv_path)
         self.assertIsNotNone(loaded_df)
-        self.assertEqual(len(loaded_df), len(self.sample_raw_df))
-        self.assertEqual(len(loaded_df.columns), len(self.sample_raw_df.columns))
+        self.assertEqual(len(loaded_df), len(self.csv_ready_df)) # Compare with the df that was saved
+        self.assertEqual(len(loaded_df.columns), len(self.csv_ready_df.columns))
 
-        date_columns = ['transaction_date', 'time_created', 'time_modified', 'time_voided']
-        for col in date_columns:
+        # Assert that 'transaction_date' is parsed correctly with M/D/YYYY format
+        self.assertTrue(pd.api.types.is_datetime64_any_dtype(loaded_df['transaction_date']))
+        # Check a specific valid date from sample_raw_data (index 0 is "01/15/2024")
+        self.assertEqual(loaded_df['transaction_date'].iloc[0], pd.Timestamp('2024-01-15'))
+        # Check that "bad_date_string" (index 7) becomes NaT
+        self.assertTrue(pd.isna(loaded_df['transaction_date'].iloc[7]))
+        # Check that "02/29/2023" (index 8) becomes NaT because it's not a valid date
+        self.assertTrue(pd.isna(loaded_df['transaction_date'].iloc[8]))
+
+
+        # Assert other date columns are also datetime
+        other_date_cols = ['time_created', 'time_modified', 'time_voided']
+        for col in other_date_cols:
             self.assertTrue(pd.api.types.is_datetime64_any_dtype(loaded_df[col]), f"Column {col} is not datetime")
-
-        # Check a specific conversion for a non-None date
-        self.assertEqual(loaded_df['transaction_date'].iloc[0], pd.Timestamp('2023-01-15'))
 
 
     def test_load_csv_data_file_not_found(self):
@@ -75,13 +95,17 @@ class TestLoadDataPipeline(unittest.TestCase):
         self.assertIsNone(loaded_df)
 
     def test_preprocess_data_output_structure(self):
-        # load_csv_data converts dates, so we simulate that before passing to preprocess
-        df_for_preprocessing = self.sample_raw_df.copy()
-        date_cols_for_sample = ['transaction_date', 'time_created', 'time_modified', 'time_voided']
-        for col in date_cols_for_sample:
-            df_for_preprocessing[col] = pd.to_datetime(df_for_preprocessing[col], errors='coerce')
+        # Create a DataFrame that simulates the state *after* load_csv_data has run
+        # This means 'transaction_date' strings are converted using M/D/YYYY format, others by inference.
+        df_post_load_csv = self.sample_raw_df.copy()
+        df_post_load_csv['transaction_date'] = pd.to_datetime(df_post_load_csv['transaction_date'], format='%m/%d/%Y', errors='coerce')
+        for col in ['time_created', 'time_modified', 'time_voided']:
+            df_post_load_csv[col] = pd.to_datetime(df_post_load_csv[col], errors='coerce')
+        # Also, 'total' should be numeric for preprocess_data input if 'invalid_total' was there
+        df_post_load_csv['total'] = pd.to_numeric(df_post_load_csv['total'], errors='coerce')
 
-        processed_df = preprocess_data(df_for_preprocessing)
+
+        processed_df = preprocess_data(df_post_load_csv) # Pass the correctly formatted DataFrame
 
         self.assertIn('transaction_day_of_week', processed_df.columns)
         self.assertIn('transaction_month', processed_df.columns)
@@ -89,74 +113,107 @@ class TestLoadDataPipeline(unittest.TestCase):
         self.assertNotIn('voided', processed_df.columns) # Original 'voided' should be dropped
 
         self.assertTrue(pd.api.types.is_bool_dtype(processed_df['is_voided']))
-        self.assertTrue(pd.api.types.is_numeric_dtype(processed_df['total']))
-        self.assertTrue(pd.api.types.is_numeric_dtype(processed_df['balance_remaining']))
+        self.assertTrue(pd.api.types.is_numeric_dtype(processed_df['total'])) # Should be float after fillna(0.0)
+        self.assertTrue(pd.api.types.is_numeric_dtype(processed_df['balance_remaining'])) # Should be float
 
-        # Check that rows with NaT in transaction_date are dropped
-        # Original sample_raw_df has one NaT after pd.to_datetime(errors='coerce')
-        self.assertEqual(len(processed_df), len(self.sample_raw_df) - 1)
+        # Check that rows with NaT in transaction_date are dropped.
+        # self.sample_raw_df has 3 rows that result in NaT for transaction_date:
+        # index 2 (None), index 7 ("bad_date_string"), index 8 ("02/29/2023")
+        # So, 10 initial rows - 3 dropped = 7 rows expected.
+        self.assertEqual(len(processed_df), 7)
 
 
     def test_preprocess_data_missing_values_handled(self):
+        # Test data with various missing and specific values to check handling
         test_data_missing = {
-            'transaction_date': [None, '2023-01-16', '2023-01-17'],
-            'total': [100, None, 200],
-            'balance_remaining': [None, 50, None],
-            'payment_type': ['Cash', None, 'Card'],
-            'voided': [0, 1, 0], # Needs to be present for the function
-            'time_created': ['2023-01-15 10:00:00', '2023-01-16 11:00:00', '2023-01-17 12:00:00'] # Required non-date features
+            'transaction_date': pd.to_datetime(['01/01/2024', None, '01/03/2024', '01/04/2024'], format='%m/%d/%Y', errors='coerce'),
+            'total': [1000, None, 2000, 500], # Test None total
+            'balance_remaining': [None, 500, 0, None], # Test None balance
+            'payment_type': ['Cash', None, 'Card', 'Check'], # Test None payment_type
+            'voided': [0, 'f', True, 0],
+            'time_created': pd.to_datetime(['2024-01-01 10:00:00']*4) # Dummy valid times
         }
         df_missing = pd.DataFrame(test_data_missing)
-        # Convert date columns like load_csv_data would
-        df_missing['transaction_date'] = pd.to_datetime(df_missing['transaction_date'], errors='coerce')
-        df_missing['time_created'] = pd.to_datetime(df_missing['time_created'], errors='coerce')
 
+        # 'total' column is already numeric or None, so no pd.to_numeric needed here for test setup
 
         processed_df = preprocess_data(df_missing.copy())
 
-        # Row with missing transaction_date should be dropped
-        self.assertEqual(len(processed_df), 2)
+        # Row with missing transaction_date (index 1) should be dropped
+        self.assertEqual(len(processed_df), 3)
 
-        # Check remaining rows (original index 1 and 2, now 0 and 1 in processed_df)
-        # Original index 1 had None for total
-        self.assertEqual(processed_df.loc[processed_df['payment_type'] == 'Unknown', 'total'].iloc[0], 0)
-        # Original index 0 had None for balance_remaining (but this row is dropped)
-        # Original index 2 had None for balance_remaining
-        self.assertEqual(processed_df.loc[processed_df['payment_type'] == 'Card', 'balance_remaining'].iloc[0], 0)
+        # Check remaining rows (original indices 0, 2, 3)
+        # Original index 0: total=1000, balance_remaining=None (should be 0.0)
+        self.assertEqual(processed_df.iloc[0]['balance_remaining'], 0.0)
+        # Original index 2: total=None (should be 0.0), payment_type=None (should be 'Unknown')
+        # This row (original index 1) was dropped.
+        # Original index 2 (now index 1 in processed_df): payment_type='Card', total=2000
+        self.assertEqual(processed_df.iloc[1]['total'], 2000.0)
+        # Original index 3 (now index 2 in processed_df): payment_type=None (should be 'Unknown')
+        # This is not how it works, the payment_type was 'Check'.
+        # The row where payment_type was None was dropped.
+        # Let's re-verify the logic for the row with None payment_type that *is not* dropped.
+        # The test_data_missing has 'Cash', None, 'Card', 'Check'. The row with None date is dropped.
+        # The remaining are Cash, Card, Check. No 'Unknown' should be generated here.
+        # To test 'Unknown' generation, a row *not* dropped for date reasons must have payment_type=None.
 
-        self.assertTrue('Unknown' in processed_df['payment_type'].values)
+        # Let's refine test_data_missing for payment_type
+        test_data_payment_type = {
+            'transaction_date': pd.to_datetime(['01/01/2024', '01/02/2024'], format='%m/%d/%Y'),
+            'total': [1000, 2000],
+            'balance_remaining': [0,0],
+            'payment_type': ['Cash', None], # Second row has None payment_type
+            'voided': [0,0],
+            'time_created': pd.to_datetime(['2024-01-01 10:00:00']*2)
+        }
+        df_payment_type = pd.DataFrame(test_data_payment_type)
+        processed_pt_df = preprocess_data(df_payment_type.copy())
+        self.assertEqual(processed_pt_df[processed_pt_df['payment_type'] == 'Unknown'].shape[0], 1)
+        self.assertEqual(processed_pt_df.iloc[1]['payment_type'], 'Unknown')
+
 
 
     def test_preprocess_data_voided_conversion(self):
-        voided_test_values = [True, False, 1, 0, 't', 'f', 'True', 'False', 'T', 'F', '1', '0', None, np.nan]
-        # Ensure other critical columns are present and valid for the same number of rows
+        # Test various forms of 'voided' inputs
+        voided_test_values = [True, False, 1, 0, 't', 'f', 'True', 'False', 'T', 'F', '1', '0', None, np.nan, 'yes', 'no', ' ', '']
+        expected_is_voided = [
+            True, False, True, False, True, False, True, False, True, False, True, False,
+            False, False, # None, np.nan
+            False, False, False, False # 'yes', 'no', ' ', '' (currently map to False by logic)
+        ]
         num_test_values = len(voided_test_values)
+
         df_voided_test = pd.DataFrame({
-            'transaction_date': pd.to_datetime([f'2023-01-{i+1:02d}' for i in range(num_test_values)]),
-            'total': [100] * num_test_values,
-            'balance_remaining': [0] * num_test_values,
+            'transaction_date': pd.to_datetime([f'01/{i+1:02d}/2024' for i in range(num_test_values)], format='%m/%d/%Y'),
+            'total': [1000.0] * num_test_values, # Use larger totals
+            'balance_remaining': [0.0] * num_test_values,
             'payment_type': ['Cash'] * num_test_values,
             'voided': voided_test_values,
-            'time_created': pd.to_datetime([f'2023-01-{i+1:02d} 10:00:00' for i in range(num_test_values)])
+            'time_created': pd.to_datetime([f'2024-01-{i+1:02d} 10:00:00' for i in range(num_test_values)])
         })
 
         processed_df = preprocess_data(df_voided_test.copy())
 
+        # Corrected expected_is_voided to match the 18 inputs
         expected_is_voided = [
-            True, False, True, False, True, False, True, False, True, False, True, False, False, False # None and np.nan become False
+            True, False, True, False, True, False, True, False, True, False, True, False,
+            False, False, # None, np.nan
+            False, False, False, False # 'yes', 'no', ' ', ''
         ]
 
         pd.testing.assert_series_equal(processed_df['is_voided'], pd.Series(expected_is_voided, name='is_voided'), check_dtype=True)
 
 
     def test_save_and_load_processed_data(self):
-        # Simulate df as it would be after load_csv_data
-        df_for_preprocessing = self.sample_raw_df.copy()
-        date_cols_for_sample = ['transaction_date', 'time_created', 'time_modified', 'time_voided']
-        for col in date_cols_for_sample:
-            df_for_preprocessing[col] = pd.to_datetime(df_for_preprocessing[col], errors='coerce')
+        # Simulate df as it would be after load_csv_data for self.sample_raw_df
+        df_post_load_csv = self.sample_raw_df.copy()
+        df_post_load_csv['transaction_date'] = pd.to_datetime(df_post_load_csv['transaction_date'], format='%m/%d/%Y', errors='coerce')
+        for col in ['time_created', 'time_modified', 'time_voided']:
+            df_post_load_csv[col] = pd.to_datetime(df_post_load_csv[col], errors='coerce')
+        # Also, handle 'total' if it contains non-numeric strings that load_csv_data wouldn't convert
+        df_post_load_csv['total'] = pd.to_numeric(df_post_load_csv['total'], errors='coerce')
 
-        processed_df = preprocess_data(df_for_preprocessing)
+        processed_df = preprocess_data(df_post_load_csv) # Use the fully prepared df
 
         # Ensure there's some data to save (preprocess_data drops one row with NaT date)
         self.assertTrue(not processed_df.empty)

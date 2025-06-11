@@ -228,11 +228,17 @@ if __name__ == "__main__":
         print("Error: Could not load or prepare actuals to determine the last actual date. Aborting.")
         sys.exit(1)
 
+    print("Actuals data for determining last_actual_date (head):")
+    print(actuals_df_for_date.head())
+    print("Actuals data for determining last_actual_date (tail):")
+    print(actuals_df_for_date.tail())
+    print(f"Actuals data shape: {actuals_df_for_date.shape}")
+
     last_actual_date = actuals_df_for_date['ds'].max()
     if pd.isna(last_actual_date): # Check if max date is NaT (Not a Time)
         print("Error: Could not determine a valid last actual date from the data. Aborting.")
         sys.exit(1)
-    print(f"Last actual date found: {last_actual_date.strftime('%Y-%m-%d')}")
+    print(f"Last actual date determined: {last_actual_date.strftime('%Y-%m-%d')}") # Updated print
 
     # Step 2: Create a DataFrame for future dates
     # Prophet's make_future_dataframe extends from the last date in model.history_dates
@@ -254,6 +260,9 @@ if __name__ == "__main__":
     # Display the tail of the full forecast (includes history and future)
     print("\nFull forecast (tail, includes history and future):")
     print(forecast_df[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail())
+    # Log the range of the future_df created by Prophet
+    if not future_df.empty:
+        print(f"Future dataframe range (from make_future_dataframe): {future_df['ds'].min().strftime('%Y-%m-%d')} to {future_df['ds'].max().strftime('%Y-%m-%d')}")
 
     # Filter for future predictions only (dates after last_actual_date)
     future_only_forecast_df = forecast_df[forecast_df['ds'] > last_actual_date].copy() # Use .copy() to avoid SettingWithCopyWarning
@@ -263,20 +272,26 @@ if __name__ == "__main__":
               "This might happen if the forecast period doesn't extend beyond historical data " \
               "or if data alignment issues occurred.")
     else:
+        print(f"Future-only forecast data range before final selection: {future_only_forecast_df['ds'].min().strftime('%Y-%m-%d')} to {future_only_forecast_df['ds'].max().strftime('%Y-%m-%d')}")
+        print(f"Shape of future-only forecast data before final selection: {future_only_forecast_df.shape}")
+
         # Select the first N days of the purely future forecast and specific columns
         # Ensure we don't try to select more rows than available
         num_rows_to_select = min(num_future_days_to_predict, len(future_only_forecast_df))
-        final_30_day_forecast = future_only_forecast_df.head(num_rows_to_select)[['ds', 'yhat', 'yhat_lower', 'yhat_upper']]
+        selected_future_forecast = future_only_forecast_df.head(num_rows_to_select)[['ds', 'yhat', 'yhat_lower', 'yhat_upper']] # Renamed variable
 
-        print(f"\nSelected {len(final_30_day_forecast)} rows for the future 30-day forecast (after {last_actual_date.strftime('%Y-%m-%d')}):")
-        print(final_30_day_forecast.head())
+        print("\nSelected 30-day future forecast to be saved (head):") # Updated print
+        print(selected_future_forecast.head())
+        print("Selected 30-day future forecast to be saved (tail):") # Added print
+        print(selected_future_forecast.tail()) # Added print
+        print(f"Selected 30-day future forecast shape: {selected_future_forecast.shape}") # Added print
 
         # Save this 30-day future forecast to CSV
         try:
             output_dir = os.path.dirname(future_forecast_output_csv)
             if output_dir and not os.path.exists(output_dir): # Create directory if it doesn't exist
                 os.makedirs(output_dir)
-            final_30_day_forecast.to_csv(future_forecast_output_csv, index=False)
+            selected_future_forecast.to_csv(future_forecast_output_csv, index=False) # Use new variable name
             print(f"\nSuccessfully saved future 30-day forecast to: {future_forecast_output_csv}")
         except Exception as e:
             print(f"\nError saving future 30-day forecast to CSV: {e}")

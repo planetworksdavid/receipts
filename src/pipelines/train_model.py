@@ -23,7 +23,6 @@ def load_processed_data(file_path: str) -> pd.DataFrame | None:
     :rtype: pd.DataFrame or None
     """
     try:
-        df = pd.read_parquet(file_path)
         # Attempt to read the Parquet file
         df = pd.read_parquet(file_path)
         print(f"Successfully loaded processed data from {file_path}")
@@ -62,8 +61,12 @@ def train_prophet_model(df: pd.DataFrame) -> Prophet | None:
     """
     # Validate input DataFrame
     if df is None or df.empty:
-        print("Error: Input DataFrame is empty. Cannot train model.")
+        print("Error: Input DataFrame for training is None or empty.")
         return None
+
+    print(f"Original data shape for training: {df.shape}")
+    print("Original data head for training:")
+    print(df.head())
 
     required_columns = ['transaction_date', 'total', 'is_voided']
     if not all(col in df.columns for col in required_columns):
@@ -71,32 +74,48 @@ def train_prophet_model(df: pd.DataFrame) -> Prophet | None:
         return None
 
     try:
-        print("Preparing data for Prophet model...")
-        # 1. Filter out voided transactions to focus on actual payments received.
-        df_filtered = df[~df['is_voided']].copy()
+        print("\nPreparing data for Prophet model...")
 
-        if df_filtered.empty:
+        # 1. Filter out voided transactions to focus on actual payments received.
+        df_non_voided = df[~df['is_voided']].copy() # Explicitly use df_non_voided
+        print(f"\nData shape after filtering voided transactions: {df_non_voided.shape}")
+        print("Data head after filtering voided (df_non_voided):")
+        print(df_non_voided.head())
+
+        if df_non_voided.empty:
             print("Error: No non-voided transactions found in the input data. Cannot train model.")
             return None
 
-        # 2. Rename columns to 'ds' (datestamp) and 'y' (target value) as required by Prophet.
-        df_prophet = df_filtered.rename(columns={'transaction_date': 'ds', 'total': 'y'})
+        # 2. Rename columns for Prophet compatibility.
+        # 'transaction_date' becomes 'ds' (datestamp).
+        # 'total' will become 'y' after aggregation.
+        df_renamed = df_non_voided.rename(columns={'transaction_date': 'ds'})
 
-        # 3. Aggregate transaction data to daily totals. Prophet works best with daily data.
-        # Group by 'ds' (which is now the transaction date) and sum 'y' (total amount).
-        df_prophet_daily = df_prophet.groupby('ds')['y'].sum().reset_index()
+        # 3. Aggregate transaction data to daily totals.
+        # Prophet requires a DataFrame with 'ds' and 'y' columns, where 'y' is the value to forecast.
+        # Here, we sum the 'total' for each day.
+        print("\nAggregating daily totals for Prophet...")
+        df_prophet_daily = df_renamed.groupby('ds')['total'].sum().reset_index()
+        df_prophet_daily = df_prophet_daily.rename(columns={'total': 'y'}) # Rename aggregated sum to 'y'
 
         if df_prophet_daily.empty:
             print("Error: Data aggregation resulted in an empty DataFrame. Ensure there's data to aggregate.")
             return None
 
-        # Basic check for sufficient data points (Prophet needs at least 2 distinct points)
+        # Basic check for sufficient data points (Prophet needs at least 2 distinct points for trend)
         if len(df_prophet_daily) < 2:
             print(f"Error: Insufficient data points ({len(df_prophet_daily)}) after aggregation for Prophet model training. Need at least 2.")
             return None
 
-        print(f"Prophet input data summary (after daily aggregation):\n{df_prophet_daily.head()}")
-        print(f"Number of data points for Prophet: {len(df_prophet_daily)}")
+        print(f"\nData shape after aggregation (daily totals for Prophet): {df_prophet_daily.shape}")
+        print("Aggregated data for Prophet (head):")
+        print(df_prophet_daily.head())
+        print("\nAggregated data for Prophet (tail):")
+        print(df_prophet_daily.tail())
+        print("\nAggregated data 'y' column description:")
+        print(df_prophet_daily['y'].describe())
+
+        print(f"\nNumber of data points for Prophet model fitting: {len(df_prophet_daily)}")
 
         # 4. Initialize and fit the Prophet model.
         # Default Prophet settings are used here. Further customization (e.g., seasonality, holidays)
@@ -154,6 +173,15 @@ if __name__ == "__main__":
     df_processed = load_processed_data(processed_data_path)
 
     if df_processed is not None and not df_processed.empty:
+        print("\n--- Data Loaded for Training ---")
+        print("Processed DataFrame head:")
+        print(df_processed.head())
+        print("\nProcessed DataFrame info:")
+        df_processed.info()
+        print("\nProcessed DataFrame 'total' column description:")
+        print(df_processed['total'].describe())
+        print("-------------------------------")
+
         # Step 2: Train Prophet model using the loaded processed data
         print("\nStep 2: Training Prophet model...")
         trained_model = train_prophet_model(df_processed)

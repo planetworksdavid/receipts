@@ -31,9 +31,14 @@ def load_csv_data(file_path: str) -> pd.DataFrame | None:
     try:
         df = pd.read_csv(file_path)
         date_columns = ['transaction_date', 'time_created', 'time_modified', 'time_voided']
-        for col in date_columns:
+        if 'transaction_date' in df.columns:
+            # Explicitly use format for 'transaction_date'
+            df['transaction_date'] = pd.to_datetime(df['transaction_date'], format='%m/%d/%Y', errors='coerce')
+
+        # For other date/time columns, pandas' default inference is usually fine
+        other_date_cols = ['time_created', 'time_modified', 'time_voided']
+        for col in other_date_cols:
             if col in df.columns:
-                # Convert column to datetime; 'coerce' turns unparseable dates into NaT
                 df[col] = pd.to_datetime(df[col], errors='coerce')
         return df
     except FileNotFoundError:
@@ -193,25 +198,49 @@ if __name__ == "__main__":
         # If CSV loading fails (e.g., file not found), use a predefined sample DataFrame for demonstration.
         print("Failed to load data from CSV. Using sample DataFrame for preprocessing demonstration.")
         sample_data = {
-            'transaction_id': [1, 2, 3, 4, 5, 6],
-            'transaction_date': ['2023-01-15', '2023-01-16', None, '2023-01-17', '2023-01-18', '2023-01-19'],
-            'total': [100, 150.50, 200, 'abc', 300, 50.25], # Includes non-numeric to test coercion
-            'balance_remaining': [0, 50.50, 10.0, 20.0, None, 0], # Includes None
-            'payment_type': ['Credit Card', 'Cash', 'Debit Card', None, 'Credit Card', 'Online'], # Includes None
-            'voided': [0, 'f', True, '1', 'FALSE', None], # Mixed types for 'voided'
-            'time_created': ['2023-01-15 10:00:00', '2023-01-16 11:00:00', '2023-01-16 12:00:00',
-                             '2023-01-17 13:00:00', '2023-01-18 14:00:00', '2023-01-19 15:00:00'],
-            'time_modified': ['2023-01-15 10:00:00', '2023-01-16 11:05:00', '2023-01-16 12:00:00',
-                              '2023-01-17 13:05:00', '2023-01-18 14:00:00', '2023-01-19 15:00:00'],
-            'time_voided': [None, None, '2023-01-16 12:30:00', None, None, None] # Includes None
+            'transaction_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            'transaction_date': [
+                '01/15/2024', '01/15/2024', None, '01/17/2024',
+                '05/30/2025', '05/30/2025', '05/31/2025',
+                'bad_date', '02/29/2023', # Invalid date to test coerce
+                '03/01/2024'
+            ], # M/D/YYYY format, includes future dates, duplicates, None, bad_date
+            'total': [500, 750.25, 2000, 1200.50, 15000, 8000, 7500, 600, 900, 120.75], # Larger totals
+            'balance_remaining': [0, 50.50, 100.0, 20.0, 5000, 0, 750.00, 60, 90, 0],
+            'payment_type': ['Credit Card', 'Cash', 'Debit Card', None, 'Credit Card', 'Online', 'Check', 'Cash', 'Credit Card', 'Debit Card'],
+            'voided': [0, 'f', True, '1', 'FALSE', None, 't', 'F', 0, 1], # Diverse voided values
+            'time_created': [
+                '2024-01-15 10:00:00', '2024-01-15 10:05:00', '2024-01-16 12:00:00',
+                '2024-01-17 13:00:00', '2025-05-30 14:00:00', '2025-05-30 14:30:00',
+                '2025-05-31 15:00:00', '2024-01-18 10:00:00', '2023-02-29 11:00:00', # time for bad date
+                '2024-03-01 12:00:00'
+                ],
+            'time_modified': [
+                '2024-01-15 10:00:00', '2024-01-15 11:05:00', '2024-01-16 12:00:00',
+                '2024-01-17 13:05:00', '2025-05-30 14:05:00', '2025-05-30 14:35:00',
+                '2025-05-31 15:10:00', '2024-01-18 10:00:00', '2023-02-29 11:00:00',
+                '2024-03-01 12:05:00'
+                ],
+            'time_voided': [
+                None, None, '2024-01-16 12:30:00', None, None, None, '2025-05-31 15:15:00',
+                None, None, '2024-03-01 12:10:00'
+                ]
         }
         df_sample_for_processing = pd.DataFrame(sample_data)
 
-        # Simulate the datetime conversion that load_csv_data would perform
-        date_cols_for_sample = ['transaction_date', 'time_created', 'time_modified', 'time_voided']
-        for col in date_cols_for_sample:
+        # Explicitly convert date/time columns in the sample DataFrame,
+        # simulating how load_csv_data would process them.
+        # This ensures preprocess_data receives data in the expected format.
+        if 'transaction_date' in df_sample_for_processing.columns:
+            df_sample_for_processing['transaction_date'] = pd.to_datetime(
+                df_sample_for_processing['transaction_date'], format='%m/%d/%Y', errors='coerce'
+            )
+        other_date_cols_sample = ['time_created', 'time_modified', 'time_voided']
+        for col in other_date_cols_sample:
             if col in df_sample_for_processing.columns:
-                 df_sample_for_processing[col] = pd.to_datetime(df_sample_for_processing[col], errors='coerce')
+                 df_sample_for_processing[col] = pd.to_datetime(
+                     df_sample_for_processing[col], errors='coerce'
+                 )
         final_df_to_process = df_sample_for_processing
 
     # Ensure there is a DataFrame to process
