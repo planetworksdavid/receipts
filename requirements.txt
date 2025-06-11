@@ -1,0 +1,5 @@
+pandas
+pyarrow
+prophet
+joblib
+scikit-learn
