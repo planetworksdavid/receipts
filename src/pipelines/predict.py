@@ -14,6 +14,7 @@ import joblib
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 import numpy as np
 import os # Used in the __main__ block for path definitions
+import sys # For sys.exit()
 
 # The load_and_prepare_actuals_for_evaluation function below handles its own data loading.
 
@@ -28,8 +29,6 @@ def load_model(model_path: str) -> Prophet | None:
     :rtype: prophet.Prophet or None
     """
     try:
-        model = joblib.load(model_path)
-        print(f"Model successfully loaded from {model_path}")
         # Attempt to load the model from the specified path
         model = joblib.load(model_path)
         print(f"Model successfully loaded from {model_path}")
@@ -204,10 +203,12 @@ def load_and_prepare_actuals_for_evaluation(processed_data_path: str) -> pd.Data
 
 if __name__ == "__main__":
     # This main block demonstrates a prediction and in-sample evaluation pipeline.
+    # It also saves a 30-day future forecast to a CSV file.
 
-    model_path = "models/prophet_model.joblib" # Path to the saved, trained model
-    processed_data_path_for_actuals = "data/processed_payments.parquet" # Path to processed data for historical actuals
-    future_periods_to_forecast = 30 # Number of days into the future to forecast
+    model_path = "models/prophet_model.joblib"
+    processed_data_path_for_actuals = "data/processed_payments.parquet"
+    future_forecast_output_csv = "data/future_30_day_forecast.csv"
+    num_future_days_to_predict = 30
 
     print("--- Starting Prediction Pipeline ---")
 
@@ -215,53 +216,89 @@ if __name__ == "__main__":
     print(f"\nStep 1: Loading model from '{model_path}'...")
     model = load_model(model_path)
 
-    if model:
-        # Step 2: Create a DataFrame for future dates
-        print(f"\nStep 2: Creating future DataFrame for {future_periods_to_forecast} days...")
-        future_df = make_future_dataframe(model, periods=future_periods_to_forecast, freq='D')
-
-        # Step 3: Generate predictions for the future dates
-        if future_df is not None:
-            print("\nStep 3: Making predictions...")
-            forecast_df = predict_forecast(model, future_df)
-
-            if forecast_df is not None:
-                # Display the tail of the forecast, showing the most recent future predictions
-                print("\nForecast (tail with predictions):")
-                print(forecast_df[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail())
-
-                # Step 4: Perform in-sample evaluation (evaluating model on data it was trained on)
-                # This is for demonstration; true evaluation requires a separate test set.
-                print("\nStep 4: Evaluating model (on in-sample/training data for demonstration)...")
-                print(f"Loading actuals for evaluation from '{processed_data_path_for_actuals}'...")
-                actuals_df = load_and_prepare_actuals_for_evaluation(processed_data_path_for_actuals)
-
-                if actuals_df is not None and not actuals_df.empty:
-                    # Generate predictions for the historical period covered by actuals_df
-                    # The model.predict() method can take historical dates too.
-                    historical_forecast_df = model.predict(actuals_df[['ds']])
-
-                    if historical_forecast_df is not None and not historical_forecast_df.empty:
-                        # Merge actual values with predicted values on the 'ds' (date) column
-                        eval_df = pd.merge(actuals_df, historical_forecast_df[['ds', 'yhat']], on='ds', how='inner')
-
-                        if not eval_df.empty:
-                            print(f"Evaluation Data (merged actuals and predictions for training period):\n{eval_df.head()}")
-                            print(f"Number of data points for in-sample evaluation: {len(eval_df)}")
-                            evaluate_model(eval_df['y'], eval_df['yhat'])
-                        else:
-                            print("Could not merge actuals and historical forecast for evaluation. " \
-                                  "Check 'ds' columns and data integrity.")
-                    else:
-                        print("Failed to generate historical forecast for evaluation.")
-                else:
-                    print("Failed to load or prepare actuals for evaluation.")
-            else:
-                print("Forecast generation failed.")
-        else:
-            print("Future DataFrame creation failed.")
-    else:
-        # This occurs if the model could not be loaded
+    if not model:
         print("Failed to load model. Aborting prediction pipeline.")
+        sys.exit(1) # Exit if model loading fails
+
+    # Determine the last actual date from processed data for filtering future forecast
+    print(f"\nStep 1.5: Determining last actual date from '{processed_data_path_for_actuals}'...")
+    actuals_df_for_date = load_and_prepare_actuals_for_evaluation(processed_data_path_for_actuals)
+
+    if actuals_df_for_date is None or actuals_df_for_date.empty:
+        print("Error: Could not load or prepare actuals to determine the last actual date. Aborting.")
+        sys.exit(1)
+
+    last_actual_date = actuals_df_for_date['ds'].max()
+    if pd.isna(last_actual_date): # Check if max date is NaT (Not a Time)
+        print("Error: Could not determine a valid last actual date from the data. Aborting.")
+        sys.exit(1)
+    print(f"Last actual date found: {last_actual_date.strftime('%Y-%m-%d')}")
+
+    # Step 2: Create a DataFrame for future dates
+    # Prophet's make_future_dataframe extends from the last date in model.history_dates
+    print(f"\nStep 2: Creating future DataFrame for {num_future_days_to_predict} days...")
+    future_df = make_future_dataframe(model, periods=num_future_days_to_predict, freq='D')
+
+    if future_df is None:
+        print("Future DataFrame creation failed. Aborting.")
+        sys.exit(1)
+
+    # Step 3: Generate predictions for the future dates
+    print("\nStep 3: Making predictions...")
+    forecast_df = predict_forecast(model, future_df)
+
+    if forecast_df is None:
+        print("Forecast generation failed. Aborting.")
+        sys.exit(1)
+
+    # Display the tail of the full forecast (includes history and future)
+    print("\nFull forecast (tail, includes history and future):")
+    print(forecast_df[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail())
+
+    # Filter for future predictions only (dates after last_actual_date)
+    future_only_forecast_df = forecast_df[forecast_df['ds'] > last_actual_date].copy() # Use .copy() to avoid SettingWithCopyWarning
+
+    if future_only_forecast_df.empty:
+        print(f"Warning: No forecast data found after the last actual date ({last_actual_date.strftime('%Y-%m-%d')}). " \
+              "This might happen if the forecast period doesn't extend beyond historical data " \
+              "or if data alignment issues occurred.")
+    else:
+        # Select the first N days of the purely future forecast and specific columns
+        # Ensure we don't try to select more rows than available
+        num_rows_to_select = min(num_future_days_to_predict, len(future_only_forecast_df))
+        final_30_day_forecast = future_only_forecast_df.head(num_rows_to_select)[['ds', 'yhat', 'yhat_lower', 'yhat_upper']]
+
+        print(f"\nSelected {len(final_30_day_forecast)} rows for the future 30-day forecast (after {last_actual_date.strftime('%Y-%m-%d')}):")
+        print(final_30_day_forecast.head())
+
+        # Save this 30-day future forecast to CSV
+        try:
+            output_dir = os.path.dirname(future_forecast_output_csv)
+            if output_dir and not os.path.exists(output_dir): # Create directory if it doesn't exist
+                os.makedirs(output_dir)
+            final_30_day_forecast.to_csv(future_forecast_output_csv, index=False)
+            print(f"\nSuccessfully saved future 30-day forecast to: {future_forecast_output_csv}")
+        except Exception as e:
+            print(f"\nError saving future 30-day forecast to CSV: {e}")
+
+    # Step 4: Perform in-sample evaluation (evaluating model on data it was trained on)
+    print("\nStep 4: Evaluating model (on in-sample/training data for demonstration)...")
+    # actuals_df_for_date can be reused here if it's the correctly prepared df for evaluation
+    if actuals_df_for_date is not None and not actuals_df_for_date.empty:
+        # Generate predictions for the historical period covered by actuals_df_for_date
+        historical_forecast_df = model.predict(actuals_df_for_date[['ds']])
+
+        if historical_forecast_df is not None and not historical_forecast_df.empty:
+            eval_df = pd.merge(actuals_df_for_date, historical_forecast_df[['ds', 'yhat']], on='ds', how='inner')
+
+            if not eval_df.empty:
+                print(f"Evaluation Data (merged actuals and predictions for training period):\n{eval_df.head()}")
+                print(f"Number of data points for in-sample evaluation: {len(eval_df)}")
+                evaluate_model(eval_df['y'], eval_df['yhat'])
+            else:
+                print("Could not merge actuals and historical forecast for evaluation. Check 'ds' columns and data integrity.")
+        else:
+            print("Failed to generate historical forecast for evaluation.")
+    # No 'else' needed here, as the error for actuals_df_for_date being None/empty was handled earlier.
 
     print("\n--- Prediction Pipeline Finished ---")

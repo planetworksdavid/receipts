@@ -18,6 +18,7 @@ The project is organized into the following main directories:
 -   `data/`: Contains raw input data (CSV) and processed data (Parquet).
     -   `payments.csv` (example): Raw input CSV file (user needs to provide this).
     -   `processed_payments.parquet`: Processed data output by `load_data.py`.
+    -   `future_30_day_forecast.csv`: CSV file containing the 30-day future forecast output by `predict.py`.
 -   `notebooks/`: Jupyter notebooks for exploratory data analysis (EDA) and experimentation.
     -   `eda.ipynb`: Example notebook for initial data exploration.
 -   `src/`: Contains the Python source code for the project.
@@ -92,6 +93,7 @@ The pipeline is executed by running individual Python scripts in sequence. Ensur
     ```bash
     python src/pipelines/predict.py
     ```
+    This script will also save a 30-day future forecast (starting from the day after the latest actual date in the dataset) to `data/future_30_day_forecast.csv`. This file will contain `ds` (date), `yhat` (forecasted value), `yhat_lower` (lower confidence bound), and `yhat_upper` (upper confidence bound) columns.
 
 ## Running Tests
 
